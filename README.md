@@ -4,4 +4,4 @@
 包括论文、笔记、作业等
 
 # 参考资料
-MIT 6.824 2020[http://nil.csail.mit.edu/6.824/2020/]
+[MIT 6.824 2020](http://nil.csail.mit.edu/6.824/2020/)
