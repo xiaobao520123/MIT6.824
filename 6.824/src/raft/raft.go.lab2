@@ -222,6 +222,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	DPrintf("[%v] RequestVote from %v, term=%v, currentTerm=%v\n", rf.me, args.CandidateId, args.Term, rf.currentTerm)
 
+	// Rule for all servers 2
+	if args.Term > rf.currentTerm {
+		rf.currentTerm = args.Term
+		rf.state = Follower
+	}
+
 	// Rule 1
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
@@ -249,8 +255,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	rf.currentTerm = args.Term
-	rf.state = Follower
 	rf.votedFor = args.CandidateId
 	rf.pong = true
 
@@ -314,6 +318,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 
 	DPrintf("[%v] AppendEntries from %v, args=%+v, currentTerm=%v, state=%v, commitIndex=%v\n", rf.me, args.LeaderId, args, rf.currentTerm, rf.state, rf.commitIndex)
+
+	// Rule for all servers 2
+	if args.Term > rf.currentTerm {
+		rf.currentTerm = args.Term
+		rf.state = Follower
+	}
 
 	// Rule 1
 	if args.Term < rf.currentTerm {
@@ -386,8 +396,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.commitIndex = dest
 	}
 
-	rf.currentTerm = args.Term
-	rf.state = Follower
 	rf.pong = true
 
 	reply.Term = rf.currentTerm
@@ -401,7 +409,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	return ok
 }
 
-func (rf *Raft) CallRequstVote(server int) (bool, int) {
+func (rf *Raft) CallRequestVote(server int) (bool, int) {
 	args := RequestVoteArgs{}
 	reply := RequestVoteReply{}
 
@@ -578,7 +586,7 @@ func (rf *Raft) AttemptElection() {
 			continue
 		}
 		go func(server int) {
-			votedGranted, T := rf.CallRequstVote(server)
+			votedGranted, T := rf.CallRequestVote(server)
 			rf.mu.Lock()
 			defer rf.mu.Unlock()
 
@@ -762,4 +770,3 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	return rf
 }
-
