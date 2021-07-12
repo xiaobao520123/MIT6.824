@@ -8,6 +8,10 @@ import (
 	"../labrpc"
 )
 
+const (
+	ClerkRPCTimeout = time.Millisecond * 1000
+)
+
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
@@ -48,42 +52,49 @@ func (ck *Clerk) Get(key string) string {
 	DPrintf("[clerk] Get, key=%v, requestId=%v\n", key, requestId)
 
 	for {
-		retVal := make(chan string)
+		done := make(chan struct{})
+		ok := false
+		var err Err
+		value := ""
+
 		go func(server int) {
-			ok, err, value := ck.CallGet(server, key, requestId)
-			if ok {
-				switch err {
-				case OK:
-					{
-						DPrintf("[clerk] get success, key=%v, value=%v\n", key, value)
-						retVal <- value
-						return
-					}
-				case ErrNoKey:
-					{
-						DPrintf("[clerk] err no key, key=%v\n", key)
-						retVal <- ""
-						return
-					}
-				case ErrWrongLeader:
-					{
-						DPrintf("[clerk] send get request to wrong leader, leaderId=%v, key=%v\n",
-							server, key)
-						break
-					}
-				}
-			}
+			ok, err, value = ck.CallGet(server, key, requestId)
+			done <- struct{}{}
 		}(ck.leaderId)
 
 		select {
-		case value := <-retVal:
+		case <-done:
 			{
-				return value
+				if ok {
+					switch err {
+					case OK:
+						{
+							DPrintf("[clerk] get success, key=%v, value=%v\n", key, value)
+							return value
+						}
+					case ErrNoKey:
+						{
+							DPrintf("[clerk] err no key, key=%v\n", key)
+							return ""
+						}
+					case ErrWrongLeader:
+						{
+							DPrintf("[clerk] send get request to wrong leader, leaderId=%v, key=%v\n",
+								ck.leaderId, key)
+							ck.shuffleLeader()
+							break
+						}
+					}
+				} else {
+					DPrintf("[clerk] send get request rpc failed, leaderId=%v, key=%v\n",
+						ck.leaderId, key)
+					ck.shuffleLeader()
+				}
 			}
-		case <-time.After(time.Millisecond * 200):
+		case <-time.After(ClerkRPCTimeout):
 			{
 				DPrintf("[clerk] Get operation timeout, retry! key=%v\n", key)
-				ck.leaderId = int(nrand()) % len(ck.servers)
+				ck.shuffleLeader()
 			}
 		}
 	}
@@ -105,42 +116,48 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	DPrintf("[clerk] %v, key=%v, value=%v, requestId=%v\n", op, key, value, requestId)
 
 	for {
-		done := make(chan bool)
+		done := make(chan struct{})
+		ok := false
+		var err Err
+
 		go func(server int) {
-			ok, err := ck.CallPutAppend(server, op, key, value, requestId)
-			if ok {
-				switch err {
-				case OK:
-					{
-						DPrintf("[clerk] op %v success, key=%v, value=%v\n", op, key, value)
-						done <- true
-						return
-					}
-				case ErrNoKey:
-					{
-						DPrintf("[clerk] err no key, key=%v\n", key)
-						done <- true
-						return
-					}
-				case ErrWrongLeader:
-					{
-						DPrintf("[clerk] send get request to wrong leader, leaderId=%v, key=%v\n",
-							server, key)
-						break
-					}
-				}
-			}
+			ok, err = ck.CallPutAppend(server, op, key, value, requestId)
+			done <- struct{}{}
 		}(ck.leaderId)
 
 		select {
 		case <-done:
 			{
-				return
+				if ok {
+					switch err {
+					case OK:
+						{
+							DPrintf("[clerk] op %v success, key=%v, value=%v\n", op, key, value)
+							return
+						}
+					case ErrNoKey:
+						{
+							DPrintf("[clerk] err no key, key=%v\n", key)
+							break
+						}
+					case ErrWrongLeader:
+						{
+							DPrintf("[clerk] send %v request to wrong leader, leaderId=%v, key=%v\n",
+								ck.leaderId, op, key)
+							ck.shuffleLeader()
+							break
+						}
+					}
+				} else {
+					DPrintf("[clerk] send %v request rpc failed, leaderId=%v, key=%v\n",
+						ck.leaderId, op, key)
+					ck.shuffleLeader()
+				}
 			}
-		case <-time.After(time.Millisecond * 200):
+		case <-time.After(ClerkRPCTimeout):
 			{
 				DPrintf("[clerk] %v operation timeout, retry! key=%v, value=%v\n", op, key, value)
-				ck.leaderId = int(nrand()) % len(ck.servers)
+				ck.shuffleLeader()
 			}
 		}
 	}
@@ -193,4 +210,8 @@ func (ck *Clerk) sendGet(server int, args *GetArgs, reply *GetReply) bool {
 
 func (ck *Clerk) sendPutAppend(server int, args *PutAppendArgs, reply *PutAppendReply) bool {
 	return ck.servers[server].Call("KVServer.PutAppend", args, reply)
+}
+
+func (ck *Clerk) shuffleLeader() {
+	ck.leaderId = int(nrand() % int64(len(ck.servers)))
 }
